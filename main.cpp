@@ -157,16 +157,18 @@ void dump(const std::vector<Particle> &particles, std::ostream &stream) {
  * @param PR Right state fluid pressure.
  * @param n_unit Unit vector of the actual interface between left and right
  * state (used for coordinate transformation to the solver frame).
+ * @param vframe Interface velocity (used to deboost).
  * @param flux Resulting fluxes.
  */
 void riemann_solve_for_flux(const RiemannSolver &solver, const double gamma,
                             const double rhoL, const double uL, const double PL,
                             const double rhoR, const double uR, const double PR,
-                            const double n_unit, double flux[3]) {
+                            const double n_unit, double vframe,
+                            double flux[3]) {
 
   // transform to the solver coordinate frame
-  const double vL = uL * n_unit;
-  const double vR = uR * n_unit;
+  const double vL = (uL - vframe) * n_unit;
+  const double vR = (uR - vframe) * n_unit;
 
   // solve the Riemann problem
   double rhosol, vsol, Psol;
@@ -176,10 +178,11 @@ void riemann_solve_for_flux(const RiemannSolver &solver, const double gamma,
   vsol *= n_unit;
 
   // compute the fluxes
+  const double vtot = vsol + vframe;
   flux[0] = rhosol * vsol;
-  flux[1] = rhosol * vsol * vsol + Psol;
+  flux[1] = rhosol * vtot * vsol + Psol;
   flux[2] =
-      (Psol / (gamma - 1.) + 0.5 * rhosol * vsol * vsol) * vsol + Psol * vsol;
+      (Psol / (gamma - 1.) + 0.5 * rhosol * vtot * vtot) * vsol + Psol * vtot;
 }
 
 /**
@@ -231,11 +234,16 @@ void do_flux(Particle &pi, const Particle &pj, const double d,
                    pj._volume * pj._matrix * d * Wj / hj;
   const double n_unit = A / std::abs(A);
 
+  // compute the interface velocity
+  const double xfac = hi / (hi + hj);
+  const double vface = pi._particle_velocity -
+                       (pi._particle_velocity - pj._particle_velocity) * xfac;
+
   // compute the flux
   double flux[3];
   riemann_solve_for_flux(solver, gamma, pi._density, pi._fluid_velocity,
                          pi._pressure, pj._density, pj._fluid_velocity,
-                         pj._pressure, n_unit, flux);
+                         pj._pressure, n_unit, vface, flux);
 
   // update the conserved variables with the flux contributions
   pi._mass -= flux[0] * A * dt;
@@ -382,6 +390,12 @@ int main(int argc, char **argv) {
           particle._volume;
     }
 
+    // set the particle velocities
+    for (size_t i = 0; i < particles.size(); ++i) {
+      Particle &particle = particles[i];
+      particle._particle_velocity = particle._fluid_velocity;
+    }
+
     // sanity check the total volume
     if (std::abs(totvol - 1.) > 0.01) {
       std::cerr << "Volume error!" << std::endl;
@@ -408,6 +422,12 @@ int main(int argc, char **argv) {
         ihigh = (ihigh < sort_order.size() - 1) ? ihigh + 1 : 0;
         d = distance(particle, particles[sort_order[ihigh]]);
       }
+    }
+
+    // move the particles
+    for (size_t i = 0; i < particles.size(); ++i) {
+      Particle &particle = particles[i];
+      particle._position += dt * particle._particle_velocity;
     }
   }
 
