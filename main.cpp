@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <vector>
 
@@ -307,6 +308,8 @@ int main(int argc, char **argv) {
   // time integration loop
   for (unsigned int iloop = 0; iloop < number_of_steps; ++iloop) {
 
+    std::cout << "Loop " << iloop << " of " << number_of_steps << std::endl;
+
     // sort the particles for quick 1D neigbour finding
     std::sort(sort_order.begin(), sort_order.end(),
               [&particles](size_t i1, size_t i2) {
@@ -428,11 +431,20 @@ int main(int argc, char **argv) {
     for (size_t i = 0; i < particles.size(); ++i) {
       Particle &particle = particles[i];
       particle._position += dt * particle._particle_velocity;
+      // wrap periodically
+      if (particle._position >= 1.) {
+        particle._position -= 1.;
+      }
+      if (particle._position < 0.) {
+        particle._position += 1.;
+      }
     }
   }
 
+  std::ofstream ofile("result.txt");
+  ofile << "# x\trho\tv\tP\n";
   // output the final snapshot
-  dump(particles, std::cout);
+  dump(particles, ofile);
 
   return 0;
 }
