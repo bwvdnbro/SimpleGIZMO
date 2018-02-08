@@ -268,11 +268,11 @@ int main(int argc, char **argv) {
   const RiemannSolver solver(gamma);
 
   // particle related
-  const unsigned int number_of_particles = 100;
+  const unsigned int number_of_particles = 1000;
 
   // time integration related
-  const double dt = 0.001;
-  const unsigned int number_of_steps = 100;
+  const double dt = 0.0001;
+  const unsigned int number_of_steps = 1000;
 
   /// derived parameters
 
@@ -410,7 +410,8 @@ int main(int argc, char **argv) {
       // first do the particles with lower indices
       size_t ilow = (i > 0) ? i - 1 : sort_order.size() - 1;
       double d = distance(particle, particles[sort_order[ilow]]);
-      while (std::abs(d) <= particle._smoothing_length) {
+      while (std::abs(d) <= particle._smoothing_length ||
+             std::abs(d) <= particles[sort_order[ilow]]._smoothing_length) {
         do_flux(particle, particles[sort_order[ilow]], d, solver, gamma, dt);
         // update index
         ilow = (ilow > 0) ? ilow - 1 : sort_order.size() - 1;
@@ -419,7 +420,8 @@ int main(int argc, char **argv) {
       // now do the particles with higher indices
       size_t ihigh = (i < sort_order.size() - 1) ? i + 1 : 0;
       d = distance(particle, particles[sort_order[ihigh]]);
-      while (std::abs(d) <= particle._smoothing_length) {
+      while (std::abs(d) <= particle._smoothing_length ||
+             std::abs(d) <= particles[sort_order[ihigh]]._smoothing_length) {
         do_flux(particle, particles[sort_order[ihigh]], d, solver, gamma, dt);
         // update index
         ihigh = (ihigh < sort_order.size() - 1) ? ihigh + 1 : 0;
