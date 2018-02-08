@@ -6,6 +6,39 @@
 #include <iostream>
 #include <vector>
 
+/*! @brief Sod shock initial condition. */
+#define IC_SOD 1
+/*! @brief Flat initial condition. */
+#define IC_FLAT 2
+/*! @brief Sine wave potential stable solution. */
+#define IC_SINEWAVE 3
+
+/*! @brief Choice of initial condition. */
+#define IC IC_FLAT
+
+/*! @brief Amplitude of the sine wave potential. */
+#define SINEWAVE_AMPLITUDE 1.
+
+/*! @brief Activate this to replace the ideal gas equation of state with an
+ *  isothermal equation of state. */
+//#define ISOTHERMAL_GAS
+
+/**
+ * @brief Get the pressure for the given particle.
+ *
+ * @param particle Particle.
+ * @param gamma Polytropic index of the fluid.
+ * @return Pressure of the fluid.
+ */
+#ifdef ISOTHERMAL_GAS
+#define get_pressure(particle, gamma) particle._density
+#else
+#define get_pressure(particle, gamma)                                          \
+  (gamma - 1.) * (particle._energy -                                           \
+                  0.5 * particle._fluid_velocity * particle._momentum) /       \
+      particle._volume
+#endif
+
 /**
  * @brief Cubic spline kernel (without smoothing length normalization).
  *
@@ -95,6 +128,13 @@ public:
   double _fluid_velocity;
   /*! @brief Fluid pressure. */
   double _pressure;
+
+  /// Gravitational quantities.
+
+  /*! @brief Gravitational acceleration. */
+  double _gravitational_acceleration;
+  /*! @brief Mass flux. */
+  double _mass_flux;
 
   /**
    * @brief Empty constructor.
@@ -250,6 +290,8 @@ void do_flux(Particle &pi, const Particle &pj, const double d,
   pi._mass -= flux[0] * A * dt;
   pi._momentum -= flux[1] * A * dt;
   pi._energy -= flux[2] * A * dt;
+
+  pi._mass_flux -= flux[0] * std::abs(A) * d;
 }
 
 /**
@@ -268,11 +310,11 @@ int main(int argc, char **argv) {
   const RiemannSolver solver(gamma);
 
   // particle related
-  const unsigned int number_of_particles = 1000;
+  const unsigned int number_of_particles = 100;
 
   // time integration related
   const double dt = 0.0001;
-  const unsigned int number_of_steps = 1000;
+  const unsigned int number_of_steps = 10000;
 
   /// derived parameters
 
@@ -294,6 +336,7 @@ int main(int argc, char **argv) {
   for (size_t i = 0; i < particles.size(); ++i) {
     particles[i]._position = (i + 0.5) * particle_size;
     particles[i]._smoothing_length = 2. * particle_size;
+#if IC == IC_SOD
     if (particles[i]._position < 0.5) {
       particles[i]._mass = 1. * particle_size;
       particles[i]._energy = 1. * particle_size / (gamma - 1.);
@@ -301,6 +344,18 @@ int main(int argc, char **argv) {
       particles[i]._mass = 0.125 * particle_size;
       particles[i]._energy = 0.1 * particle_size / (gamma - 1.);
     }
+#elif IC == IC_SINEWAVE
+    const double rho = std::exp(-0.5 * SINEWAVE_AMPLITUDE * M_1_PI *
+                                std::cos(2. * M_PI * particles[i]._position));
+    particles[i]._mass = rho * particle_size;
+    particles[i]._energy = rho * particle_size / (gamma - 1.);
+#else
+    particles[i]._mass = 1. * particle_size;
+    particles[i]._energy = 1. * particle_size / (gamma - 1.);
+#endif
+
+    particles[i]._gravitational_acceleration =
+        SINEWAVE_AMPLITUDE * std::sin(2. * M_PI * particles[i]._position);
   }
 
   /// simulation
@@ -387,10 +442,7 @@ int main(int argc, char **argv) {
       // compute primitive variables
       particle._density = particle._mass / particle._volume;
       particle._fluid_velocity = particle._momentum / particle._mass;
-      particle._pressure =
-          (gamma - 1.) * (particle._energy -
-                          0.5 * particle._fluid_velocity * particle._momentum) /
-          particle._volume;
+      particle._pressure = get_pressure(particle, gamma);
     }
 
     // set the particle velocities
@@ -407,6 +459,7 @@ int main(int argc, char **argv) {
     // flux exchange
     for (size_t i = 0; i < sort_order.size(); ++i) {
       Particle &particle = particles[sort_order[i]];
+      particle._mass_flux = 0.;
       // first do the particles with lower indices
       size_t ilow = (i > 0) ? i - 1 : sort_order.size() - 1;
       double d = distance(particle, particles[sort_order[ilow]]);
@@ -427,6 +480,11 @@ int main(int argc, char **argv) {
         ihigh = (ihigh < sort_order.size() - 1) ? ihigh + 1 : 0;
         d = distance(particle, particles[sort_order[ihigh]]);
       }
+
+      particle._energy += dt * (particle._momentum + particle._mass_flux) *
+                          particle._gravitational_acceleration;
+      particle._momentum +=
+          dt * particle._mass * particle._gravitational_acceleration;
     }
 
     // move the particles
