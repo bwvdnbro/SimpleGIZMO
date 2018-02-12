@@ -14,7 +14,7 @@
 #define IC_SINEWAVE 3
 
 /*! @brief Choice of initial condition. */
-#define IC IC_FLAT
+#define IC IC_SINEWAVE
 
 /*! @brief Amplitude of the sine wave potential. */
 #define SINEWAVE_AMPLITUDE 1.
@@ -22,6 +22,12 @@
 /*! @brief Activate this to replace the ideal gas equation of state with an
  *  isothermal equation of state. */
 //#define ISOTHERMAL_GAS
+
+/*! @brief Activate this to set up random particle positions. */
+//#define RANDOM_POSITIONS
+
+/*! @brief Activate this to fix the particle positions. */
+//#define FIX_PARTICLES
 
 /**
  * @brief Get the pressure for the given particle.
@@ -38,6 +44,8 @@
                   0.5 * particle._fluid_velocity * particle._momentum) /       \
       particle._volume
 #endif
+
+double rand_double() { return ((double)rand()) / ((double)RAND_MAX); }
 
 /**
  * @brief Cubic spline kernel (without smoothing length normalization).
@@ -314,7 +322,7 @@ int main(int argc, char **argv) {
 
   // time integration related
   const double dt = 0.0001;
-  const unsigned int number_of_steps = 10000;
+  const unsigned int number_of_steps = 1000000;
 
   /// derived parameters
 
@@ -334,24 +342,36 @@ int main(int argc, char **argv) {
   // we immediately initialize the conserved variables, assuming a perfect
   // particle volume
   for (size_t i = 0; i < particles.size(); ++i) {
+#ifdef RANDOM_POSITIONS
+    particles[i]._position = (i + rand_double()) * particle_size;
+#else
     particles[i]._position = (i + 0.5) * particle_size;
-    particles[i]._smoothing_length = 2. * particle_size;
+#endif
+  }
+
+  for (size_t i = 0; i < particles.size(); ++i) {
+    const size_t iprev = (i > 0) ? i - 1 : particles.size() - 1;
+    const size_t inext = (i < particles.size() - 1) ? i + 1 : 0;
+    const double volume =
+        0.5 * std::abs(distance(particles[iprev], particles[inext]));
+    particles[i]._smoothing_length = 2. * volume;
 #if IC == IC_SOD
     if (particles[i]._position < 0.5) {
-      particles[i]._mass = 1. * particle_size;
-      particles[i]._energy = 1. * particle_size / (gamma - 1.);
+      particles[i]._mass = 1. * volume;
+      particles[i]._energy = 1. * volume / (gamma - 1.);
     } else {
-      particles[i]._mass = 0.125 * particle_size;
-      particles[i]._energy = 0.1 * particle_size / (gamma - 1.);
+      particles[i]._mass = 0.125 * volume;
+      particles[i]._energy = 0.1 * volume / (gamma - 1.);
     }
 #elif IC == IC_SINEWAVE
     const double rho = std::exp(-0.5 * SINEWAVE_AMPLITUDE * M_1_PI *
                                 std::cos(2. * M_PI * particles[i]._position));
-    particles[i]._mass = rho * particle_size;
-    particles[i]._energy = rho * particle_size / (gamma - 1.);
+    particles[i]._mass = rho * volume;
+    particles[i]._energy = rho * volume / (gamma - 1.) *
+                           (1. - 0.01 * std::abs(0.5 - particles[i]._position));
 #else
-    particles[i]._mass = 1. * particle_size;
-    particles[i]._energy = 1. * particle_size / (gamma - 1.);
+    particles[i]._mass = 1. * volume;
+    particles[i]._energy = 1. * volume / (gamma - 1.);
 #endif
 
     particles[i]._gravitational_acceleration =
@@ -443,13 +463,18 @@ int main(int argc, char **argv) {
       particle._density = particle._mass / particle._volume;
       particle._fluid_velocity = particle._momentum / particle._mass;
       particle._pressure = get_pressure(particle, gamma);
+
+      //      particle._fluid_velocity += 0.5 * dt *
+      //      particle._gravitational_acceleration;
     }
 
+#ifndef FIX_PARTICLES
     // set the particle velocities
     for (size_t i = 0; i < particles.size(); ++i) {
       Particle &particle = particles[i];
       particle._particle_velocity = particle._fluid_velocity;
     }
+#endif
 
     // sanity check the total volume
     if (std::abs(totvol - 1.) > 0.01) {
@@ -498,6 +523,9 @@ int main(int argc, char **argv) {
       if (particle._position < 0.) {
         particle._position += 1.;
       }
+
+      particles[i]._gravitational_acceleration =
+          SINEWAVE_AMPLITUDE * std::sin(2. * M_PI * particles[i]._position);
     }
   }
 
